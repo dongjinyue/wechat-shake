@@ -65,6 +65,6 @@ with tempfile.TemporaryDirectory(dir=BUILD) as directory:
     with zipfile.ZipFile(signed) as archive:
         assert archive.read("assets/xposed_init").strip() == b"local.shake.WechatHook"
         assert {"AndroidManifest.xml","classes.dex","resources.arsc"} <= set(archive.namelist())
-    output = BUILD/"wechat-shake-0.8.apk"
+    output = BUILD/"wechat-shake-1.0.0.apk"
     signed.replace(output)
     print(output)

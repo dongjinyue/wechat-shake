@@ -206,8 +206,8 @@ public final class Panel extends Service {
         long t=now();
         String message,button;
         if (run == null) {
-            message = result.isEmpty() ? "就绪" : result+" · 已输出 "+cycles+" 次";
-            message += (quick ? "\n快速变向" : "\n平滑");
+            message = result.isEmpty() ? "就绪" : result+" · 波形 "+cycles+" 周期";
+            message += (quick ? "\n连续斜坡 · 约 " + Motion.rhythm(hz) + " 周期/秒" : "\n平滑");
             button="开始";
         } else {
             if (output>0 && t-output<Motion.LEASE) message="正在输出";
@@ -215,7 +215,8 @@ public final class Panel extends Service {
             else if (online>0 && t-online<Motion.LEASE) message="模块在线，等待传感器";
             else if (failed>0 && t-failed<Motion.LEASE) message="当前系统适配失败";
             else message="未收到微信模块回执";
-            message+="\n已输出 "+cycles+" 次 · 剩 "+Math.max(0,(run.end-t+999)/1000)+" 秒";
+            message+="\n波形 "+cycles+" 周期 · 剩 "+Math.max(0,(run.end-t+999)/1000)+" 秒";
+            if (run.quick) message += "\n连续斜坡 · 约 " + Motion.rhythm(run.hz) + " 周期/秒";
             button="停止";
         }
         if (run == null && !result.isEmpty()) {

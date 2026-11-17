@@ -4,6 +4,13 @@ package local.shake;
 final class Motion {
     static final int DEFAULT_RATE = 2, DEFAULT_SECONDS = 30;
     static final int MAX_RATE = 50;
+    // 快速模式持续改变读数，减少固定检测间隔连续采到相同峰值造成的漏计。
+    private static final long[] PERIOD_JITTER_NS = {0, 12000000L, 24000000L, 6000000L};
+    static long quickPeriod(int hz) { return Math.max(300000000L, 1000000000L / hz); }
+    static String rhythm(int hz) {
+        double rate = 1000000000.0 / (quickPeriod(hz) + 10500000L);
+        return String.format(java.util.Locale.ROOT, "%.1f", rate);
+    }
     static final long LEASE = 700;
     static boolean valid(int hz, int seconds) {
         return hz >= 1 && hz <= MAX_RATE && seconds >= 1 && seconds <= 300;
@@ -41,21 +48,22 @@ final class Motion {
             long gap = previous < 0 ? Long.MAX_VALUE : ns - previous;
             gapMs = previous < 0 ? 0 : gap / 1000000L;
             previous = ns;
-            if (gap >= 1000000000L / (2 * hz)) {
+            long period = quick ? quickPeriod(hz) + PERIOD_JITTER_NS[cycles % PERIOD_JITTER_NS.length] : 1000000000L;
+            if (gap >= (quick ? period / 2 : period / (2 * hz))) {
                 phase = 0;
                 return;
             }
-            phase += gap * hz;
-            cycles += (int)(phase / 1000000000L);
-            phase %= 1000000000L;
+            phase += quick ? gap : gap * hz;
+            if (phase >= period) {
+                phase -= period;
+                cycles++;
+                period = quick ? quickPeriod(hz) + PERIOD_JITTER_NS[cycles % PERIOD_JITTER_NS.length] : 1000000000L;
+            }
             if (quick) {
-                // 三轴在约 20 毫秒内从负峰切到正峰，半周期后反向；调低频率只拉长两次变向之间的间隔。
-                double position = phase / 1000000000.0;
-                double distance = position <= 0.5 ? Math.min(position, 0.5 - position)
-                        : -Math.min(position - 0.5, 1.0 - position);
-                // 高频时缩短过渡段，让波形在四分之一周期内仍能达到原设定峰值。
-                double normalized = distance / Math.min(0.25, hz * 0.010);
-                offset = (float)(18.0 * Math.max(-1.0, Math.min(1.0, normalized)));
+                // 斜坡从负峰持续上升后回落。周期约 300ms 时，间隔 100～200ms 的
+                // 两次检测在上升段和跨周期时都有明显差值，避免正负峰驻留的盲区。
+                double position = (double)phase / period;
+                offset = (float)(36.0 * position - 18.0);
             } else {
                 offset = (float)(18.0 * Math.sin(2.0 * Math.PI * phase / 1000000000L));
             }

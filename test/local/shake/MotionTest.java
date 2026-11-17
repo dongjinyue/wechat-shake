@@ -22,7 +22,28 @@ public class MotionTest {
         }
         return score;
     }
+    // 重放网页的 >100ms 筛选、三轴和差值阈值，覆盖高频设置反而零分的回归。
+    static int sampledPageScore(int hz, int sensorMs, int pageMs, int pageOffset) {
+        Motion.Stream stream = new Motion.Stream();
+        double previous = 9.81;
+        int last = pageOffset, score = 0;
+        for (int t = 0; t <= 30000; t += sensorMs) {
+            stream.sample(t * 1000000L, hz, true);
+            if (t - last <= 100 || t - last < pageMs) continue;
+            float[] values = {0, 0, 9.81f};
+            if (stream.sampled) stream.apply(values);
+            double sum = values[0] + values[1] + values[2];
+            if (Math.abs(sum - previous) / (t - last) * 10000 > 1000) score++;
+            previous = sum;
+            last = t;
+        }
+        return score;
+    }
     public static void main(String[] args) {
+        // 在具备至少 270 个检测机会的回放中，波形也必须达到 270 次。
+        int targetScore = sampledPageScore(10, 5, 110, 0);
+        System.out.println("30s, target10, page110ms=" + targetScore);
+        check(targetScore >= 270);
         Motion.Run r = new Motion.Run("demo", 2, 30, false, 100);
         check(r.start == 100 && r.end == 30100);
         Motion.Run shortest = new Motion.Run("short", 2, 1, true, 42);
@@ -43,7 +64,7 @@ public class MotionTest {
                 check(!s.sampled && s.cycles == hz * 5);
             }
         }
-        // 5 毫秒的事件流支持全部档位，同时校验两种模式的完整来回数。
+        // 平滑模式保留原频率，快速模式核对实际完整周期和三轴幅度。
         for (int rate = 1; rate <= 50; rate++) {
             for (boolean quick : new boolean[]{false, true}) {
                 Motion.Stream stream = new Motion.Stream();
@@ -59,13 +80,14 @@ public class MotionTest {
                     highest = Math.max(highest, stream.offset);
                     lowest = Math.min(lowest, stream.offset);
                 }
-                check(stream.cycles == rate && highest > 1 && lowest < -1);
-                if (rate == 50) check(highest == 18 && lowest == -18);
+                check((quick ? stream.cycles >= 1 && stream.cycles <= rate : stream.cycles == rate)
+                        && highest > 1 && lowest < -1);
+                if (rate == 50 && !quick) check(highest == 18 && lowest == -18);
             }
         }
         Motion.Stream tooSlow = new Motion.Stream();
         for (int t = 0; t <= 1000; t += 10) {
-            tooSlow.sample(t * 1000000L, 50, true);
+            tooSlow.sample(t * 1000000L, 50, false);
             check(!tooSlow.sampled && tooSlow.cycles == 0);
         }
         for (int step : new int[]{20, 50}) {
@@ -85,12 +107,41 @@ public class MotionTest {
                 smooth.sample(t * 1000000L, 2, false);
                 peakFast = Math.max(peakFast, Math.abs(fast.offset - prevFast));
                 peakSmooth = Math.max(peakSmooth, Math.abs(smooth.offset - prevSmooth));
-                check(Math.abs(fast.offset) <= 18 && fast.cycles == smooth.cycles);
+                check(Math.abs(fast.offset) <= 18 && fast.cycles <= smooth.cycles);
             }
-            // 50 毫秒的采样点可能正好落在过零处，仅观测到半个峰峰值。
+            // 连续上升后的回落应产生明显变化，并保持原有三轴幅度边界。
             check(peakFast >= 16 && peakFast > peakSmooth);
             System.out.println("sampleMs=" + step + ", max change smooth=" + peakSmooth + ", quick=" + peakFast);
         }
-        System.out.println("PASS: boundaries, two directions, 1-50 Hz in both modes, sampling limits and gaps");
+        for (int sensorMs : new int[]{5, 9, 16, 20}) {
+            for (int pageMs : new int[]{101, 110, 125, 150, 200}) {
+                for (int offset : new int[]{0, 31, 77}) {
+                    int ten = sampledPageScore(10, sensorMs, pageMs, offset);
+                    int forty = sampledPageScore(40, sensorMs, pageMs, offset);
+                    check(forty == ten && forty > 0);
+                    int actualInterval = ((Math.max(pageMs, 101) + sensorMs - 1) / sensorMs) * sensorMs;
+                    int firstSample = ((offset + Math.max(pageMs, 101) + sensorMs - 1) / sensorMs) * sensorMs;
+                    int opportunities = 1 + (30000 - firstSample) / actualInterval;
+                    if (forty < opportunities - 2 || forty > opportunities) {
+                        throw new AssertionError("sensor=" + sensorMs + ", page=" + pageMs
+                                + ", offset=" + offset + ", score=" + forty + ", limit=" + opportunities);
+                    }
+                }
+            }
+            System.out.println("sensorMs=" + sensorMs + ", page125ms="
+                    + sampledPageScore(40, sensorMs, 125, 0));
+            System.out.println("sensorMs=" + sensorMs + ", page101ms="
+                    + sampledPageScore(10, sensorMs, 101, 0));
+        }
+        Motion.Stream interrupted = new Motion.Stream();
+        interrupted.sample(0, 40, true);
+        interrupted.sample(16000000L, 40, true);
+        check(interrupted.sampled);
+        int before = interrupted.cycles;
+        interrupted.sample(9000000000L, 40, true);
+        check(!interrupted.sampled && interrupted.cycles == before);
+        interrupted.sample(9016000000L, 40, true);
+        check(interrupted.sampled && interrupted.cycles == before);
+        System.out.println("PASS: boundaries, XYZ, smooth frequency, quick sampling, page detector replay and gaps");
     }
 }

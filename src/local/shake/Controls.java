@@ -42,6 +42,7 @@ public final class Controls extends Activity {
         quick.setText("快速变向");
         quick.setChecked(prefs.getBoolean("quick", true));
         box.addView(quick);
+        label(box, "快速变向采用连续斜坡和快速回落，减少间隔采样漏计。高频目标会折算为约 3.2 个波形周期/秒；页面每个周期可检测到多次变化，成绩以页面为准。");
         permission = label(box, "");
         Button overlay = new Button(this);
         overlay.setText("管理悬浮窗权限");
